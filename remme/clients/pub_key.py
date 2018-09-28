@@ -13,6 +13,7 @@
 # limitations under the License.
 # ------------------------------------------------------------------------
 import logging
+import base64
 import datetime
 
 from cryptography.hazmat.primitives import serialization
@@ -45,15 +46,15 @@ class PubKeyClient(BasicClient):
 
     @classmethod
     def get_new_pub_key_payload(self, public_key, entity_hash, entity_hash_signature, valid_from, valid_to,
-                                public_key_type=NewPubKeyPayload.RSA, entity_type=NewPubKeyPayload.PERSONAL):
+                                public_key_type=NewPubKeyPayload.RSA, rsa_signature_padding=NewPubKeyPayload.PSS):
         payload = NewPubKeyPayload()
         payload.public_key = public_key
         payload.public_key_type = public_key_type
-        payload.entity_type = entity_type
         payload.entity_hash = entity_hash
         payload.entity_hash_signature = entity_hash_signature
         payload.valid_from = valid_from
         payload.valid_to = valid_to
+        payload.rsa_signature_padding = rsa_signature_padding
 
         return payload
 
@@ -180,7 +181,8 @@ class PubKeyClient(BasicClient):
         crt_export = cert.public_bytes(serialization.Encoding.PEM)
         crt_bin = cert.public_bytes(serialization.Encoding.DER)
         pub_key = cert.public_key().public_bytes(encoding=serialization.Encoding.PEM,
-                                                 format=serialization.PublicFormat.SubjectPublicKeyInfo).decode('utf-8')
+                                                 format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        pub_key = base64.b64encode(pub_key).decode('utf-8')
         crt_hash = hash512(crt_bin.hex())
         rem_sig = client.sign_text(crt_hash)
         crt_sig = cls.get_pub_key_signature(key, rem_sig).hex()
