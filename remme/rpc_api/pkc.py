@@ -52,10 +52,10 @@ async def get_public_key_info(request):
         now = time.time()
         valid_from = pub_key_data.payload.valid_from
         valid_to = pub_key_data.payload.valid_to
-        return {'is_revoked': pub_key_data.revoked,
+        return {'is_revoked': pub_key_data.is_revoked,
                 'owner_public_key': pub_key_data.owner,
                 'type': pub_key_type,
-                'is_valid': (not pub_key_data.revoked and valid_from < now and
+                'is_valid': (not pub_key_data.is_revoked and valid_from < now and
                              now < valid_to),
                 'valid_from': valid_from,
                 'valid_to': valid_to,

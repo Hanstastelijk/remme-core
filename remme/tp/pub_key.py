@@ -15,8 +15,8 @@
 
 import logging
 import binascii
-import base64
 import hashlib
+import abc
 
 import ed25519
 import ecdsa
@@ -54,6 +54,119 @@ PUB_KEY_MAX_VALIDITY = timedelta(365)
 PUB_KEY_STORE_PRICE = 10
 
 
+def detect_processor_cls(config):
+    if isinstance(config, NewPubKeyPayload.RSAConfiguration):
+        return RSAProcessor
+    elif isinstance(config, NewPubKeyPayload.ECDSAConfiguration):
+        return ECDSAProcessor
+    elif isinstance(config, NewPubKeyPayload.Ed25519Configuration):
+        return Ed25519Processor
+    raise NotImplementedError
+
+
+class BasePubKeyProcessor(metaclass=abc.ABCMeta):
+
+    def __init__(self, entity_hash, entity_hash_signature,
+                 valid_from, valid_to, hashing_algorithm, config):
+        self._entity_hash = entity_hash
+        self._entity_hash_signature = entity_hash_signature
+        self._valid_from = valid_from
+        self._valid_to = valid_to
+        self._hashing_algorithm = hashing_algorithm
+        self._config = config
+
+    @abc.abstractmethod
+    def get_hashing_algorithm(self):
+        """Return libriary special algoritm in according to protobuf
+        """
+
+    @abc.abstractmethod
+    def get_public_key(self):
+        """Get public key from given signature or points
+        """
+
+    @abc.abstractmethod
+    def verify(self):
+        """Verify if signature was successfull
+        """
+
+
+class RSAProcessor(BasePubKeyProcessor):
+
+    def verify(self):
+        verifier = load_pem_public_key(self.config.key,
+                                       default_backend())
+
+        try:
+            verifier.verify(self._entity_hash_signature, self._entity_hash,
+                            self.get_padding(), self.get_hashing_algorithm()())
+            return True
+        except InvalidSignature:
+            return False
+
+    def get_public_key(self):
+        return binascii.hexlify(self.config.key)
+
+    def get_hashing_algorithm(self):
+        alg_name = NewPubKeyPayload.HashingAlgorithm \
+            .Name(self.hashing_algorithm)
+        return getattr(hashes, alg_name)
+
+    def get_padding(self):
+        if self._config.padding == NewPubKeyPayload.PSS:
+            return padding.PSS(mgf=padding.MGF1(self.get_hashing_algorithm()()),
+                               salt_length=padding.PSS.MAX_LENGTH)
+        elif self._config.padding == NewPubKeyPayload.PKCS1v15:
+            return padding.PKCS1v15()
+        else:
+            raise NotImplementedError('Unsupported RSA padding')
+
+
+class ECDSAProcessor(BasePubKeyProcessor):
+
+    def verify(self):
+        verifier = ecdsa.VerifyingKey.from_string(self.get_public_key(),
+                                                  self.get_curve_type())
+        try:
+            verifier.verify(self._entity_hash_signature, self._entity_hash,
+                            self.get_hashing_algorithm())
+            return True
+        except ecdsa.BadSignatureError:
+            return False
+
+    def get_public_key(self):
+        return binascii.hexlify(self.config.key)
+
+    def get_hashing_algorithm(self):
+        alg_name = NewPubKeyPayload.HashingAlgorithm \
+            .Name(self.hashing_algorithm).lower()
+        return getattr(hashlib, alg_name)
+
+    def get_curve_type(self):
+        curve_name = NewPubKeyPayload.ECDSAConfiguration.EC \
+            .Name(self.config.ec)
+        return getattr(ecdsa, curve_name)
+
+
+class Ed25519Processor(BasePubKeyProcessor):
+
+    def verify(self):
+        verifier = ed25519.VerifyingKey(self.get_public_key(), encoding="hex")
+        try:
+            verifier.verify(self._entity_hash_signature,
+                            self._entity_hash,
+                            encoding="hex")
+            return True
+        except ed25519.BadSignatureError:
+            return False
+
+    def get_public_key(self):
+        return binascii.hexlify(self.config.key)
+
+    def get_hashing_algorithm(self):
+        raise NotImplementedError
+
+
 class PubKeyHandler(BasicHandler):
     def __init__(self):
         super().__init__(FAMILY_NAME, FAMILY_VERSIONS)
@@ -70,36 +183,25 @@ class PubKeyHandler(BasicHandler):
             }
         }
 
-    def _verify_rsa(self, ehs_bytes, eh_bytes, public_key, sig_padding):
-        verifier = load_pem_public_key(public_key, default_backend())
-        if sig_padding == NewPubKeyPayload.PSS:
-            _padding = padding.PSS(mgf=padding.MGF1(hashes.SHA512()),
-                                   salt_length=padding.PSS.MAX_LENGTH)
-        elif sig_padding == NewPubKeyPayload.PKCS1v15:
-            _padding = padding.PKCS1v15()
-        else:
-            raise InvalidTransaction('Unsupported RSA padding')
-        LOGGER.info('Padding found: %s', _padding.name)
-        verifier.verify(ehs_bytes, eh_bytes, _padding, hashes.SHA512())
-
-    def _verify_ecdsa(self, ehs_bytes, eh_bytes, public_key):
-        verifier = ecdsa.VerifyingKey.from_string(
-            binascii.unhexlify(public_key),
-            ecdsa.SECP256k1
-        )
-        verifier.verify(ehs_bytes, eh_bytes, hashlib.sha512)
-
-    def _verify_eddsa(self, ehs_bytes, eh_bytes, public_key):
-        verifier = ed25519.VerifyingKey(public_key, encoding="hex")
-        verifier.verify(base64.b64encode(ehs_bytes), eh_bytes,
-                        encoding="base64")
-
     def _store_pub_key(self, context, signer_pubkey, transaction_payload):
-        address = self.make_address_from_data(transaction_payload.public_key)
-        LOGGER.info('Pub key address {}'.format(address))
+        conf_name = transaction_payload.WhichOneof('configuration')
+        if not conf_name:
+            raise InvalidTransaction('Configuration for public key not set')
 
-        public_key = transaction_payload.public_key.encode('utf-8')
-        loaded_public_key = base64.b64decode(public_key)
+        conf_payload = getattr(transaction_payload, conf_name)
+
+        processor_cls = detect_processor_cls(conf_payload)
+        processor = processor_cls(transaction_payload.entity_hash,
+                                  transaction_payload.entity_hash_signature,
+                                  transaction_payload.valid_from,
+                                  transaction_payload.valid_to,
+                                  transaction_payload.hashing_algorithm,
+                                  conf_payload)
+
+        public_key = processor.get_public_key()
+
+        address = self.make_address_from_data(public_key)
+        LOGGER.info('Pub key address {}'.format(address))
 
         account_address = AccountHandler() \
             .make_address_from_data(signer_pubkey)
@@ -110,30 +212,12 @@ class PubKeyHandler(BasicHandler):
         if data:
             raise InvalidTransaction('This pub key is already registered.')
 
-        try:
-            ehs_bytes = binascii.unhexlify(transaction_payload.entity_hash_signature)
-            eh_bytes = binascii.unhexlify(transaction_payload.entity_hash)
-        except binascii.Error:
-            LOGGER.debug(f'entity_hash_signature {transaction_payload.entity_hash_signature}')
-            LOGGER.debug(f'entity_hash {transaction_payload.entity_hash}')
-            raise InvalidTransaction('Entity hash or signature not a hex format')
-
-        try:
-            if transaction_payload.public_key_type == NewPubKeyPayload.RSA:
-                self._verify_rsa(ehs_bytes, eh_bytes, loaded_public_key,
-                                 transaction_payload.rsa_signature_padding)
-
-            elif transaction_payload.public_key_type == NewPubKeyPayload.ECDSA:
-                self._verify_ecdsa(ehs_bytes, eh_bytes, loaded_public_key)
-
-            elif transaction_payload.public_key_type == NewPubKeyPayload.EdDSA:
-                self._verify_eddsa(ehs_bytes, eh_bytes, loaded_public_key)
-
-        except (InvalidSignature, ed25519.BadSignatureError, ecdsa.BadSignatureError):
+        sig_is_valid = processor.validate()
+        if sig_is_valid is False:
             raise InvalidTransaction('Invalid signature')
 
-        valid_from = datetime.fromtimestamp(transaction_payload.valid_from)
-        valid_to = datetime.fromtimestamp(transaction_payload.valid_to)
+        valid_from = datetime.fromtimestamp(processor.valid_from)
+        valid_to = datetime.fromtimestamp(processor.valid_to)
 
         if valid_to - valid_from > PUB_KEY_MAX_VALIDITY:
             raise InvalidTransaction('The public key validity exceeds '
@@ -142,7 +226,7 @@ class PubKeyHandler(BasicHandler):
         data = PubKeyStorage()
         data.owner = signer_pubkey
         data.payload.CopyFrom(transaction_payload)
-        data.revoked = False
+        data.is_revoked = False
 
         if not account:
             account = Account()
@@ -179,9 +263,9 @@ class PubKeyHandler(BasicHandler):
             raise InvalidTransaction('No such pub key.')
         if signer_pubkey != data.owner:
             raise InvalidTransaction('Only owner can revoke the pub key.')
-        if data.revoked:
+        if data.is_revoked:
             raise InvalidTransaction('The pub key is already revoked.')
-        data.revoked = True
+        data.is_revoked = True
 
         LOGGER.info('Revoked the pub key on address {}'.format(transaction_payload.address))
 

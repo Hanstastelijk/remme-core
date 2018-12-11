@@ -46,7 +46,7 @@ class PubKeyClient(BasicClient):
 
     @classmethod
     def get_new_pub_key_payload(self, public_key, entity_hash, entity_hash_signature, valid_from, valid_to,
-                                public_key_type=NewPubKeyPayload.RSA, rsa_signature_padding=NewPubKeyPayload.PSS):
+                                public_key_type, rsa_signature_padding):
         payload = NewPubKeyPayload()
         payload.public_key = public_key
         payload.public_key_type = public_key_type

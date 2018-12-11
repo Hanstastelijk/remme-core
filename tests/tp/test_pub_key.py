@@ -97,7 +97,7 @@ class PubKeyTestCase(HelperTestCase):
         data = PubKeyStorage()
         data.owner = self.account_signer1.get_public_key().as_hex()
         data.payload.CopyFrom(transaction_payload)
-        data.revoked = False
+        data.is_revoked = False
 
         self.expect_get({cert_address: None, self.account_address1: account})
         self.expect_get({_make_settings_key('remme.economy_enabled'): None})
@@ -157,11 +157,11 @@ class PubKeyTestCase(HelperTestCase):
         data = PubKeyStorage()
         data.owner = context.client.get_signer().get_public_key().as_hex()
         data.payload.CopyFrom(transaction_payload)
-        data.revoked = False
+        data.is_revoked = False
 
         self.expect_get({cert_address: data})
 
-        data.revoked = True
+        data.is_revoked = True
 
         self.expect_set(transaction_signature, PubKeyMethod.REVOKE, {
             cert_address: data
@@ -183,7 +183,7 @@ class PubKeyTestCase(HelperTestCase):
         data = PubKeyStorage()
         data.owner = self.account_signer2.get_public_key().as_hex()
         data.payload.CopyFrom(transaction_payload)
-        data.revoked = False
+        data.is_revoked = False
 
         self.expect_get({cert_address: data})
 
