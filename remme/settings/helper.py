@@ -37,6 +37,7 @@ STATE_TIMEOUT_SEC = 10
 def _get_setting_value(context, key, default_value=None):
     address = _make_settings_key(key)
     setting = _get_setting_entry(context, address)
+
     for entry in setting.entries:
         if key == entry.key:
             return entry.value

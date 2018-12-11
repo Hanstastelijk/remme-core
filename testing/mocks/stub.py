@@ -80,7 +80,7 @@ class StubContext:
         """
         return self._state
 
-    def get_state(self, addresses):
+    def get_state(self, addresses, timeout=None):
         """
         Get a list of addresses with its data as key-value tuple from state.
 
@@ -110,7 +110,7 @@ class StubContext:
 
         return response
 
-    def set_state(self, entries):
+    def set_state(self, entries, timeout=None):
         """
         Set a list of addresses with its data as key-value tuple to state.
 
@@ -137,7 +137,7 @@ class StubContext:
 
         return response
 
-    def add_event(self, event_type, attributes=None, data=None):
+    def add_event(self, event_type, attributes=None, data=None, timeout=None):
         """
         Add a new event to the events list.
 

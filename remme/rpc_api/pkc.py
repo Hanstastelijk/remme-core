@@ -49,6 +49,7 @@ async def get_public_key_info(request):
     except KeyError:
         raise RpcInvalidParamsError(message='Missed public_key_address')
 
+
     client = PubKeyClient()
     try:
         pub_key_data = client.get_status(public_key_address)

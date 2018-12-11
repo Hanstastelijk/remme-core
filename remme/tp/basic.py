@@ -61,7 +61,7 @@ def get_event_attributes(updated_state, header_signature):
 
 def get_data(context, pb_class, address):
     raw_data = context.get_state([address])
-    LOGGER.debug(f'Raw data: {raw_data}')
+    LOGGER.info(f'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA Raw data: {raw_data}')
     if raw_data:
         try:
             data = pb_class()
@@ -129,8 +129,13 @@ class BasicHandler(metaclass=Singleton):
         return is_address(address) and address.startswith(self._prefix)
 
     def apply(self, transaction, context):
+
+        LOGGER.info(f'transaction request is {transaction}')
+
         transaction_payload = TransactionPayload()
         transaction_payload.ParseFromString(transaction.payload)
+
+        LOGGER.info(f'transaction_payload is {transaction_payload}')
 
         state_processor = self.get_state_processor()
         try:
